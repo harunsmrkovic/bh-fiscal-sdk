@@ -3,6 +3,7 @@ import * as Mustache from "mustache";
 import { format } from "date-fns";
 import {
   FiscalSummary,
+  GetDailyReportParams,
   PrintPeriodicalReportParams,
   PrintReceiptParams,
   ReceiptResult,
@@ -111,9 +112,31 @@ class FiscalSDK {
     return this.parseFiscalSummary(response.data, "OsnovneInformacije");
   }
 
+  async getDailyReport(params: GetDailyReportParams): Promise<FiscalSummary> {
+    const response = await this.request(
+      "oi",
+      this.parseTemplate("oididnevniizvjestaj", params)
+    );
+    const summary = this.parseFiscalSummary(
+      response.data,
+      "ElektronskiDnevniIzvjestaj"
+    );
+
+    // The printer silently falls back to the current basic-info snapshot when
+    // BrojDI is out of range (verified on firmware v1.0.125+7661270). Detect
+    // it by checking the returned Z number against the requested one.
+    if (summary.zNumber !== params.brojDI) {
+      throw new Error(
+        `Daily report ${params.brojDI} not available (printer returned Z=${summary.zNumber ?? "<empty>"})`
+      );
+    }
+
+    return summary;
+  }
+
   private parseFiscalSummary(
     xml: string,
-    command: "OsnovneInformacije"
+    command: "OsnovneInformacije" | "ElektronskiDnevniIzvjestaj"
   ): FiscalSummary {
     const parser = new XMLParser();
     const parsed = parser.parse(xml);

@@ -52,9 +52,16 @@ export interface ReceiptResult {
   amount: number;
 }
 
+export interface GetDailyReportParams {
+  brojDI: number;
+}
+
 /**
- * Parsed response from `OsnovneInformacije` (oi). Returns the current
- * snapshot since the last Z report.
+ * Parsed response from the `oi` endpoint. With no parameters it returns the
+ * current snapshot since the last Z report (snake_case field names, newer
+ * firmware). With a `BrojDI` parameter it returns the historical Z report for
+ * that number (mixed-case field names, older-style — same field set,
+ * different naming). The parser accepts both.
  *
  * Tring firmware revisions disagree on field naming. Newer firmware emits
  * snake_case names (`z_number`, `first_BF`, `sale_TA`, `canceled_sale_SEA`,
