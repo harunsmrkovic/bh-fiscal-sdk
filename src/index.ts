@@ -4,9 +4,12 @@ import { format } from "date-fns";
 import {
   FiscalSummary,
   GetDailyReportParams,
+  MoneyMovementParams,
   PrintPeriodicalReportParams,
   PrintReceiptParams,
   ReceiptResult,
+  ReclaimReceiptParams,
+  ReclamationResult,
   SDKConfig,
   WriteToDisplayParams,
 } from "./types";
@@ -80,6 +83,59 @@ class FiscalSDK {
     }
   }
 
+  async reclaimReceipt(
+    params: ReclaimReceiptParams
+  ): Promise<ReclamationResult> {
+    // Tring sign convention: cash leg is sent as Iznos=0 (the refund value is
+    // implied by the items); non-cash legs are sent as negative amounts. The
+    // public API takes positive amounts so callers don't have to remember this.
+    const refunds = params.refunds.map((r) => ({
+      type: r.type,
+      signedAmount: r.type === "Gotovina" ? 0 : -r.amount,
+    }));
+
+    const response = await this.request(
+      "stampatireklamiraniracun",
+      this.parseTemplate("stampatireklamiraniracun", {
+        ...params,
+        refunds,
+        note: params.note ?? "",
+      })
+    );
+
+    const parser = new XMLParser();
+    const parsed = parser.parse(response.data);
+
+    const responses: Record<string, string> = (
+      [].concat(parsed.KasaOdgovor.Odgovori.Odgovor) as {
+        Naziv: string;
+        Vrijednost: string;
+      }[]
+    ).reduce(
+      (acc, item) => ({ ...acc, [item.Naziv]: item.Vrijednost }),
+      {}
+    );
+
+    if (parsed.KasaOdgovor.VrstaOdgovora !== "OK") {
+      throw new Error(
+        `Error: ${responses["Štampanje reklamiranog računa"] ?? JSON.stringify(responses)}`
+      );
+    }
+
+    // Docs put the new reclamation's id in BrojReklamiranogRacuna while
+    // BrojFiskalnogRacuna echoes the input. Firmware v1.0.125+7661270 omits
+    // BrojReklamiranogRacuna and puts the new id in BrojFiskalnogRacuna
+    // directly. Prefer the explicit field, fall back to the echo slot.
+    const rawId =
+      responses.BrojReklamiranogRacuna ?? responses.BrojFiskalnogRacuna;
+    return {
+      id: +rawId,
+      date: responses.DatumFiskalnogRacuna,
+      time: responses.VrijemeFiskalnogRacuna,
+      amount: +responses.IznosFiskalnogRacuna,
+    };
+  }
+
   async printPeriodicalReport(params: PrintPeriodicalReportParams) {
     await this.request(
       "stampatiperiodicniizvjestaj",
@@ -103,6 +159,40 @@ class FiscalSDK {
       "stampatipresjekstanja",
       this.parseTemplate("stampatipresjekstanja")
     );
+  }
+
+  async depositMoney(params: MoneyMovementParams): Promise<void> {
+    const response = await this.request(
+      "unosnovca",
+      this.parseTemplate("cashmovement", params)
+    );
+    this.assertKasaOk(response.data, "UnosNovca");
+  }
+
+  async withdrawMoney(params: MoneyMovementParams): Promise<void> {
+    const response = await this.request(
+      "povratnovca",
+      this.parseTemplate("cashmovement", params)
+    );
+    this.assertKasaOk(response.data, "PovratNovca");
+  }
+
+  private assertKasaOk(xml: string, commandName: string): void {
+    const parser = new XMLParser();
+    const parsed = parser.parse(xml);
+    if (parsed?.KasaOdgovor?.VrstaOdgovora === "OK") return;
+
+    const responses: Record<string, string> = (
+      [].concat(parsed?.KasaOdgovor?.Odgovori?.Odgovor ?? []) as {
+        Naziv: string;
+        Vrijednost: string;
+      }[]
+    ).reduce(
+      (acc, item) => ({ ...acc, [item.Naziv]: item.Vrijednost }),
+      {}
+    );
+    const detail = Object.values(responses).join("; ") || "unknown error";
+    throw new Error(`Error: ${commandName} failed: ${detail}`);
   }
 
   async writeToDisplay(params: WriteToDisplayParams = {}): Promise<void> {

@@ -52,6 +52,48 @@ export interface ReceiptResult {
   amount: number;
 }
 
+/**
+ * Refund leg of a reclamation receipt. Specify the natural (positive) refund
+ * amount per payment type — the SDK applies the Tring sign convention
+ * internally (cash legs are sent as Iznos=0, non-cash legs are sent as a
+ * negative amount). Positive raw amounts would be interpreted by the printer
+ * as customer top-up (doplata), which this API deliberately does not expose.
+ */
+export interface RefundMethod {
+  type: PaymentMethodType;
+  amount: number;
+}
+
+export interface ReclaimReceiptParams {
+  /** Number of the original fiscal receipt being reclaimed. */
+  originalReceiptId: string | number;
+  articles: Article[];
+  refunds: RefundMethod[];
+  buyer?: ReceiptBuyer;
+  note?: string;
+}
+
+/**
+ * Result of a reclamation. `id` is the sequential number assigned by the
+ * printer to the *reclamation document itself*, not the original receipt
+ * being reclaimed (the caller already has that). The docs (v3.0.1) describe
+ * `BrojReklamiranogRacuna` as the field carrying this number, but firmware
+ * v1.0.125+7661270 omits it and uses `BrojFiskalnogRacuna` for the same
+ * purpose. The parser accepts either.
+ */
+export type ReclamationResult = ReceiptResult;
+
+/**
+ * Move money in or out of the till for a given payment type. Per Tring docs
+ * §7.5, supported types are Gotovina, Cek, Kartica and Virman. Amount is
+ * always a positive natural number; direction is determined by which method
+ * is called (depositMoney vs withdrawMoney).
+ */
+export interface MoneyMovementParams {
+  type: PaymentMethodType;
+  amount: number;
+}
+
 export interface GetDailyReportParams {
   brojDI: number;
 }
