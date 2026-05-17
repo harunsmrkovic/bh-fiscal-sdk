@@ -4,6 +4,7 @@ import stampatidnevniizvjestaj from "./stampatidnevniizvjestaj";
 import stampatipresjekstanja from "./stampatipresjekstanja";
 import osnovneinformacije from "./osnovneinformacije";
 import oididnevniizvjestaj from "./oididnevniizvjestaj";
+import upisinadisplej2 from "./upisinadisplej2";
 
 const templates: Record<string, string> = {
   stampatifiskalniracun,
@@ -12,6 +13,7 @@ const templates: Record<string, string> = {
   stampatipresjekstanja,
   osnovneinformacije,
   oididnevniizvjestaj,
+  upisinadisplej2,
 };
 
 export default templates;

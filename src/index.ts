@@ -8,6 +8,7 @@ import {
   PrintReceiptParams,
   ReceiptResult,
   SDKConfig,
+  WriteToDisplayParams,
 } from "./types";
 import xmlTemplates from "./templates";
 import { XMLParser } from "fast-xml-parser";
@@ -101,6 +102,16 @@ class FiscalSDK {
     await this.request(
       "stampatipresjekstanja",
       this.parseTemplate("stampatipresjekstanja")
+    );
+  }
+
+  async writeToDisplay(params: WriteToDisplayParams = {}): Promise<void> {
+    await this.request(
+      "upisinadisplej2",
+      this.parseTemplate("upisinadisplej2", {
+        line1: params.line1 ?? "",
+        line2: params.line2 ?? "",
+      })
     );
   }
 

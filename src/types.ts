@@ -56,6 +56,11 @@ export interface GetDailyReportParams {
   brojDI: number;
 }
 
+export interface WriteToDisplayParams {
+  line1?: string;
+  line2?: string;
+}
+
 /**
  * Parsed response from the `oi` endpoint. With no parameters it returns the
  * current snapshot since the last Z report (snake_case field names, newer
