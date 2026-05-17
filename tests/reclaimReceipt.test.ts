@@ -164,6 +164,37 @@ describe("reclaimReceipt", () => {
     expect(lastBody).toContain("<Napomena>Hvala na posjeti !!!</Napomena>");
   });
 
+  it("renders <PDVBroj> inside <Kupac> when buyer.pdvNumber is set", async () => {
+    await fiscal.reclaimReceipt({
+      ...baseParams,
+      buyer: {
+        id: "1234567890123",
+        pdvNumber: "123456789012",
+        name: "Tring d.o.o.",
+        address: "Lejlekuša bb",
+        zipCode: "75320",
+        city: "Gračanica",
+      },
+    });
+    expect(lastBody).toContain("<IDbroj>1234567890123</IDbroj>");
+    expect(lastBody).toContain("<PDVBroj>123456789012</PDVBroj>");
+  });
+
+  it("omits <PDVBroj> when buyer has no pdvNumber", async () => {
+    await fiscal.reclaimReceipt({
+      ...baseParams,
+      buyer: {
+        id: "1234567890123",
+        name: "Tring d.o.o.",
+        address: "Lejlekuša bb",
+        zipCode: "75320",
+        city: "Gračanica",
+      },
+    });
+    expect(lastBody).toContain("<IDbroj>1234567890123</IDbroj>");
+    expect(lastBody).not.toContain("<PDVBroj>");
+  });
+
   it("throws on Greska response surfacing the printer error", async () => {
     server.use(
       rest.post<string>(

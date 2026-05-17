@@ -10,6 +10,7 @@ export default `<?xml version="1.0" encoding="utf-8"?>
         {{#buyer}}
 		<Kupac>
 			<IDbroj>{{id}}</IDbroj>
+			{{#pdvNumber}}<PDVBroj>{{.}}</PDVBroj>{{/pdvNumber}}
 			<Naziv>{{name}}</Naziv>
 			<Adresa>{{address}}</Adresa>
 			<PostanskiBroj>{{zipCode}}</PostanskiBroj>

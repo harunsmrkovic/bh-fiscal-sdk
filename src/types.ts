@@ -3,7 +3,13 @@ export interface SDKConfig {
 }
 
 interface ReceiptBuyer {
+  // 13-char JIB/JMBG. Mandatory whenever a buyer is present — the driver
+  // drops the whole Kupac block on the receipt if this is malformed.
   id: string;
+  // 12-digit VAT (PDV) registration number, optional. Only PDV-registered
+  // buyers have one; krajnji kupci do not. Per Tring docs v3.0.1 §7.3 it
+  // sits between <IDbroj> and <Naziv> inside <Kupac>.
+  pdvNumber?: string;
   name: string;
   address: string;
   zipCode: string;

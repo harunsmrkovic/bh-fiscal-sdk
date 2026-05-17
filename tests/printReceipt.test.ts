@@ -104,6 +104,64 @@ describe("Print receipt", () => {
         time: "08:30:59",
       });
     });
+
+    it("includes <Kupac> block with PDVBroj when buyer.pdvNumber is set", async () => {
+      await fiscal.printReceipt({
+        articles: [
+          {
+            id: "1",
+            name: "Zvake",
+            price: 10,
+            rate: "E",
+            quantity: 1,
+            discount: 0,
+          },
+        ],
+        paymentMethods: [{ type: "Gotovina", amount: 10 }],
+        billId: "1",
+        date: new Date("2023-01-01T08:30:59"),
+        buyer: {
+          id: "1234567890123",
+          pdvNumber: "123456789012",
+          name: "Tring d.o.o.",
+          address: "Lejlekuša bb",
+          zipCode: "75320",
+          city: "Gračanica",
+        },
+      });
+
+      expect(lastBody).toContain("<IDbroj>1234567890123</IDbroj>");
+      expect(lastBody).toContain("<PDVBroj>123456789012</PDVBroj>");
+      expect(lastBody).toContain("<Naziv>Tring d.o.o.</Naziv>");
+    });
+
+    it("omits <PDVBroj> when buyer has no pdvNumber", async () => {
+      await fiscal.printReceipt({
+        articles: [
+          {
+            id: "1",
+            name: "Zvake",
+            price: 10,
+            rate: "E",
+            quantity: 1,
+            discount: 0,
+          },
+        ],
+        paymentMethods: [{ type: "Gotovina", amount: 10 }],
+        billId: "1",
+        date: new Date("2023-01-01T08:30:59"),
+        buyer: {
+          id: "1234567890123",
+          name: "Tring d.o.o.",
+          address: "Lejlekuša bb",
+          zipCode: "75320",
+          city: "Gračanica",
+        },
+      });
+
+      expect(lastBody).toContain("<IDbroj>1234567890123</IDbroj>");
+      expect(lastBody).not.toContain("<PDVBroj>");
+    });
   });
 
   describe("when the service is not working", () => {
