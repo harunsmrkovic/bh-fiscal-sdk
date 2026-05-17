@@ -70,7 +70,7 @@ describe("getBasicInfo", () => {
   describe("with newer-firmware (snake_case) response from docs", () => {
     let lastBody: string;
     const server = setupServer(
-      rest.post<string>("http://localhost:4000/oi.xml", async (_req, res, ctx) =>
+      rest.post<string>("http://localhost:4000/oi", async (_req, res, ctx) =>
         res(ctx.set("Content-Type", "text/xml"), ctx.body(docsResponseXml))
       )
     );
@@ -125,7 +125,7 @@ describe("getBasicInfo", () => {
 
   describe("with older-firmware (mixed-case) response from xml_examples", () => {
     const server = setupServer(
-      rest.post<string>("http://localhost:4000/oi.xml", async (_req, res, ctx) =>
+      rest.post<string>("http://localhost:4000/oi", async (_req, res, ctx) =>
         res(ctx.set("Content-Type", "text/xml"), ctx.body(xmlExamplesFixture))
       )
     );
@@ -168,7 +168,7 @@ describe("getBasicInfo", () => {
 
   describe("on Greska response", () => {
     const server = setupServer(
-      rest.post<string>("http://localhost:4000/oi.xml", async (_req, res, ctx) =>
+      rest.post<string>("http://localhost:4000/oi", async (_req, res, ctx) =>
         res(
           ctx.set("Content-Type", "text/xml"),
           ctx.body(`<?xml version="1.0" encoding="utf-8"?>

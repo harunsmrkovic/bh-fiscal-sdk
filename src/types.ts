@@ -52,16 +52,9 @@ export interface ReceiptResult {
   amount: number;
 }
 
-export interface GetDailyReportParams {
-  brojDI: number;
-}
-
 /**
- * Parsed response from `OsnovneInformacije` (oi.xml) and
- * `Elektronski Dnevni Izvjestaj` (oi.di.xml). Both commands return the same
- * field set; semantically:
- *   - getBasicInfo  -> current snapshot since the last Z
- *   - getDailyReport({ brojDI }) -> historical snapshot for that Z number
+ * Parsed response from `OsnovneInformacije` (oi). Returns the current
+ * snapshot since the last Z report.
  *
  * Tring firmware revisions disagree on field naming. Newer firmware emits
  * snake_case names (`z_number`, `first_BF`, `sale_TA`, `canceled_sale_SEA`,

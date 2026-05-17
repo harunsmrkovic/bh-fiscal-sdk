@@ -3,7 +3,6 @@ import * as Mustache from "mustache";
 import { format } from "date-fns";
 import {
   FiscalSummary,
-  GetDailyReportParams,
   PrintPeriodicalReportParams,
   PrintReceiptParams,
   ReceiptResult,
@@ -106,23 +105,15 @@ class FiscalSDK {
 
   async getBasicInfo(): Promise<FiscalSummary> {
     const response = await this.request(
-      "oi.xml",
+      "oi",
       this.parseTemplate("osnovneinformacije")
     );
     return this.parseFiscalSummary(response.data, "OsnovneInformacije");
   }
 
-  async getDailyReport(params: GetDailyReportParams): Promise<FiscalSummary> {
-    const response = await this.request(
-      "oi.di.xml",
-      this.parseTemplate("oididnevniizvjestaj", params)
-    );
-    return this.parseFiscalSummary(response.data, "ElektronskiDnevniIzvjestaj");
-  }
-
   private parseFiscalSummary(
     xml: string,
-    command: "OsnovneInformacije" | "ElektronskiDnevniIzvjestaj"
+    command: "OsnovneInformacije"
   ): FiscalSummary {
     const parser = new XMLParser();
     const parsed = parser.parse(xml);
