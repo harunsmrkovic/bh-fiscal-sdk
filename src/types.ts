@@ -1,5 +1,7 @@
 export interface SDKConfig {
   host: string;
+  /** Axios request timeout in milliseconds. Defaults to 1000. */
+  timeout?: number;
 }
 
 interface ReceiptBuyer {

@@ -18,7 +18,7 @@ class FiscalSDK {
   constructor(config: SDKConfig) {
     this.axios = axios.create({
       baseURL: config.host,
-      timeout: 1000,
+      timeout: config.timeout ?? 1000,
       headers: { "Content-Type": "text/xml" },
     });
   }
