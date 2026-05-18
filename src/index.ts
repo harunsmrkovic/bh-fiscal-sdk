@@ -2,10 +2,16 @@ import axios, { AxiosInstance } from "axios";
 import * as Mustache from "mustache";
 import { format } from "date-fns";
 import {
+  FiscalSummary,
+  GetDailyReportParams,
+  MoneyMovementParams,
   PrintPeriodicalReportParams,
   PrintReceiptParams,
   ReceiptResult,
+  ReclaimReceiptParams,
+  ReclamationResult,
   SDKConfig,
+  WriteToDisplayParams,
 } from "./types";
 import xmlTemplates from "./templates";
 import { XMLParser } from "fast-xml-parser";
@@ -77,6 +83,59 @@ class FiscalSDK {
     }
   }
 
+  async reclaimReceipt(
+    params: ReclaimReceiptParams
+  ): Promise<ReclamationResult> {
+    // Tring sign convention: cash leg is sent as Iznos=0 (the refund value is
+    // implied by the items); non-cash legs are sent as negative amounts. The
+    // public API takes positive amounts so callers don't have to remember this.
+    const refunds = params.refunds.map((r) => ({
+      type: r.type,
+      signedAmount: r.type === "Gotovina" ? 0 : -r.amount,
+    }));
+
+    const response = await this.request(
+      "stampatireklamiraniracun",
+      this.parseTemplate("stampatireklamiraniracun", {
+        ...params,
+        refunds,
+        note: params.note ?? "",
+      })
+    );
+
+    const parser = new XMLParser();
+    const parsed = parser.parse(response.data);
+
+    const responses: Record<string, string> = (
+      [].concat(parsed.KasaOdgovor.Odgovori.Odgovor) as {
+        Naziv: string;
+        Vrijednost: string;
+      }[]
+    ).reduce(
+      (acc, item) => ({ ...acc, [item.Naziv]: item.Vrijednost }),
+      {}
+    );
+
+    if (parsed.KasaOdgovor.VrstaOdgovora !== "OK") {
+      throw new Error(
+        `Error: ${responses["Štampanje reklamiranog računa"] ?? JSON.stringify(responses)}`
+      );
+    }
+
+    // Docs put the new reclamation's id in BrojReklamiranogRacuna while
+    // BrojFiskalnogRacuna echoes the input. Firmware v1.0.125+7661270 omits
+    // BrojReklamiranogRacuna and puts the new id in BrojFiskalnogRacuna
+    // directly. Prefer the explicit field, fall back to the echo slot.
+    const rawId =
+      responses.BrojReklamiranogRacuna ?? responses.BrojFiskalnogRacuna;
+    return {
+      id: +rawId,
+      date: responses.DatumFiskalnogRacuna,
+      time: responses.VrijemeFiskalnogRacuna,
+      amount: +responses.IznosFiskalnogRacuna,
+    };
+  }
+
   async printPeriodicalReport(params: PrintPeriodicalReportParams) {
     await this.request(
       "stampatiperiodicniizvjestaj",
@@ -100,6 +159,186 @@ class FiscalSDK {
       "stampatipresjekstanja",
       this.parseTemplate("stampatipresjekstanja")
     );
+  }
+
+  async depositMoney(params: MoneyMovementParams): Promise<void> {
+    const response = await this.request(
+      "unosnovca",
+      this.parseTemplate("cashmovement", params)
+    );
+    this.assertKasaOk(response.data, "UnosNovca");
+  }
+
+  async withdrawMoney(params: MoneyMovementParams): Promise<void> {
+    const response = await this.request(
+      "povratnovca",
+      this.parseTemplate("cashmovement", params)
+    );
+    this.assertKasaOk(response.data, "PovratNovca");
+  }
+
+  private assertKasaOk(xml: string, commandName: string): void {
+    const parser = new XMLParser();
+    const parsed = parser.parse(xml);
+    if (parsed?.KasaOdgovor?.VrstaOdgovora === "OK") return;
+
+    const responses: Record<string, string> = (
+      [].concat(parsed?.KasaOdgovor?.Odgovori?.Odgovor ?? []) as {
+        Naziv: string;
+        Vrijednost: string;
+      }[]
+    ).reduce(
+      (acc, item) => ({ ...acc, [item.Naziv]: item.Vrijednost }),
+      {}
+    );
+    const detail = Object.values(responses).join("; ") || "unknown error";
+    throw new Error(`Error: ${commandName} failed: ${detail}`);
+  }
+
+  async writeToDisplay(params: WriteToDisplayParams = {}): Promise<void> {
+    await this.request(
+      "upisinadisplej2",
+      this.parseTemplate("upisinadisplej2", {
+        line1: params.line1 ?? "",
+        line2: params.line2 ?? "",
+      })
+    );
+  }
+
+  async getBasicInfo(): Promise<FiscalSummary> {
+    const response = await this.request(
+      "oi",
+      this.parseTemplate("osnovneinformacije")
+    );
+    return this.parseFiscalSummary(response.data, "OsnovneInformacije");
+  }
+
+  async getDailyReport(params: GetDailyReportParams): Promise<FiscalSummary> {
+    const response = await this.request(
+      "oi",
+      this.parseTemplate("oididnevniizvjestaj", params)
+    );
+    const summary = this.parseFiscalSummary(
+      response.data,
+      "ElektronskiDnevniIzvjestaj"
+    );
+
+    // The printer silently falls back to the current basic-info snapshot when
+    // BrojDI is out of range (verified on firmware v1.0.125+7661270). Detect
+    // it by checking the returned Z number against the requested one.
+    if (summary.zNumber !== params.brojDI) {
+      throw new Error(
+        `Daily report ${params.brojDI} not available (printer returned Z=${summary.zNumber ?? "<empty>"})`
+      );
+    }
+
+    return summary;
+  }
+
+  private parseFiscalSummary(
+    xml: string,
+    command: "OsnovneInformacije" | "ElektronskiDnevniIzvjestaj"
+  ): FiscalSummary {
+    const parser = new XMLParser();
+    const parsed = parser.parse(xml);
+
+    const r: Record<string, string> = (
+      [].concat(parsed.KasaOdgovor.Odgovori.Odgovor) as {
+        Naziv: string;
+        Vrijednost: string;
+      }[]
+    ).reduce(
+      (acc, item) => ({ ...acc, [item.Naziv]: item.Vrijednost }),
+      {}
+    );
+
+    if (parsed.KasaOdgovor.VrstaOdgovora !== "OK") {
+      throw new Error(`Error: ${command} failed: ${JSON.stringify(r)}`);
+    }
+
+    const num = (...keys: string[]): number | undefined => {
+      for (const k of keys) {
+        const v = r[k];
+        if (v !== undefined && v !== "") return +v;
+      }
+      return undefined;
+    };
+    const str = (...keys: string[]): string | undefined => {
+      for (const k of keys) {
+        const v = r[k];
+        if (v !== undefined && v !== "") return v;
+      }
+      return undefined;
+    };
+    const date = (...keys: string[]): Date | undefined => {
+      for (const k of keys) {
+        const v = r[k];
+        if (v !== undefined && v !== "") return new Date(v);
+      }
+      return undefined;
+    };
+
+    return {
+      currentDateTime: date("current_datetime", "Datum"),
+      ibfm: str("ibfm"),
+      fwVersion: str("fw_version"),
+      lastInspectionDate: date("last_inspection_date"),
+      lastTransferDate: date("last_transfer_date"),
+
+      firstBF: num("first_BF", "firstBF"),
+      lastBF: num("last_BF", "lastBF"),
+      firstRF: num("first_RF", "firstRF"),
+      lastRF: num("last_RF", "lastRF"),
+
+      zNumber: num("z_number", "zNumber"),
+      services: num("services", "Services"),
+      resets: num("resets", "Resets"),
+      taxChanges: num("tax_changes", "Taxes"),
+      totalServices: num("TotalServices"),
+      totalTaxes: num("TotalTaxes"),
+      totalResets: num("TotalResets"),
+
+      cash: num("cash"),
+      check: num("check"),
+      card: num("card"),
+      transferOrder: num("transfer_order"),
+
+      saleTA: num("sale_TA", "TA"),
+      saleTE: num("sale_TE", "TE"),
+      saleTJ: num("sale_TJ", "TJ"),
+      saleTK: num("sale_TK", "TK"),
+      saleTM: num("sale_TM", "TM"),
+      saleZA: num("sale_ZA", "ZA"),
+      saleZE: num("sale_ZE", "ZE"),
+      saleZJ: num("sale_ZJ", "ZJ"),
+      saleZK: num("sale_ZK", "ZK"),
+      saleZM: num("sale_ZM", "ZM"),
+
+      canceledSaleSEA: num("canceled_sale_SEA", "SEA"),
+      canceledSaleEA: num("canceled_sale_EA", "EA"),
+      canceledSaleSEP: num("canceled_sale_SEP", "SEP"),
+
+      reclaimedSaleAT: num("reclaimed_sale_AT", "AT"),
+      reclaimedSaleET: num("reclaimed_sale_ET", "ET"),
+      reclaimedSaleJT: num("reclaimed_sale_JT", "JT"),
+      reclaimedSaleKT: num("reclaimed_sale_KT", "KT"),
+      reclaimedSaleMT: num("reclaimed_sale_MT", "MT"),
+      reclaimedSaleAZ: num("reclaimed_sale_AZ", "AZ"),
+      reclaimedSaleEZ: num("reclaimed_sale_EZ", "EZ"),
+      reclaimedSaleJZ: num("reclaimed_sale_JZ", "JZ"),
+      reclaimedSaleKZ: num("reclaimed_sale_KZ", "KZ"),
+      reclaimedSaleMZ: num("reclaimed_sale_MZ", "MZ"),
+
+      canceledReclaimedSaleSRA: num("canceled_reclaimed_sale_SRA", "SRA"),
+      canceledReclaimedSaleRA: num("canceled_reclaimed_sale_RA", "RA"),
+      canceledReclaimedSaleSRP: num("canceled_reclaimed_sale_SRP", "SRP"),
+
+      taxA: num("tax_a"),
+      taxE: num("tax_e"),
+      taxJ: num("tax_j"),
+      taxK: num("tax_k"),
+      taxM: num("tax_m"),
+    };
   }
 }
 

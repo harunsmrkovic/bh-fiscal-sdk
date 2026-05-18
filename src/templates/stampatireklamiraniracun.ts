@@ -3,10 +3,8 @@ export default `<?xml version="1.0" encoding="utf-8"?>
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xmlns:xsd="http://www.w3.org/2001/XMLSchema">
 	<BrojZahtjeva>{{requestId}}</BrojZahtjeva>
-	<VrstaZahtjeva>0</VrstaZahtjeva>
+	<VrstaZahtjeva>2</VrstaZahtjeva>
 	<NoviObjekat>
-		<BrojRacuna>{{billId}}</BrojRacuna>
-		<Datum>{{date}}</Datum>
         {{#buyer}}
 		<Kupac>
 			<IDbroj>{{id}}</IDbroj>
@@ -33,12 +31,14 @@ export default `<?xml version="1.0" encoding="utf-8"?>
             {{/articles}}
 		</StavkeRacuna>
 		<VrstePlacanja>
-            {{#paymentMethods}}
+            {{#refunds}}
 			<VrstaPlacanja>
 				<Oznaka>{{type}}</Oznaka>
-				<Iznos>{{amount}}</Iznos>
+				<Iznos>{{signedAmount}}</Iznos>
 			</VrstaPlacanja>
-			{{/paymentMethods}}
+            {{/refunds}}
 		</VrstePlacanja>
+		<Napomena>{{note}}</Napomena>
+		<BrojRacuna>{{originalReceiptId}}</BrojRacuna>
 	</NoviObjekat>
 </RacunZahtjev>`;
