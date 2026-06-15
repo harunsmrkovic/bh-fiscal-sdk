@@ -295,5 +295,13 @@ describe("Print receipt", () => {
       expect(error.response).toContain("Količina nije validna");
       expect(error.response).toContain("<VrstaOdgovora>Greska</VrstaOdgovora>");
     });
+
+    it("exposes the structured device message, code, and response type", async () => {
+      const error = await fiscal.printReceipt(params).catch((e) => e);
+
+      expect(error.deviceMessage).toBe("Količina nije validna ! (0.001 - 999999.999)");
+      expect(error.code).toBe("408");
+      expect(error.responseType).toBe("Greska");
+    });
   });
 });

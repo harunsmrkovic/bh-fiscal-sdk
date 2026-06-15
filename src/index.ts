@@ -5,6 +5,7 @@ import {
   FiscalError,
   FiscalSummary,
   GetDailyReportParams,
+  KasaErrorDetails,
   MoneyMovementParams,
   PrintPeriodicalReportParams,
   PrintReceiptParams,
@@ -20,33 +21,52 @@ import { XMLParser } from "fast-xml-parser";
 
 const CLASSIC_DATE_FORMAT = `yyyy-MM-dd'T'hh:mm:ss`;
 
-// Build a human-readable message from a failed <KasaOdgovor>. Firmware
-// revisions disagree on the shape of an error <Odgovor>: some put a command
-// label in <Naziv> and the error text in <Vrijednost>, while others put the
-// human-readable reason in <Naziv> and a numeric status code in <Vrijednost>
-// (e.g. "Količina nije validna ! (0.001 - 999999.999)" / 408). Surfacing both
-// fields covers either convention, instead of looking up a fixed key that one
-// of them never returns — which is what produced the old "Error: undefined".
-function formatKasaError(parsed: any): string {
+// Pull the structured device error details out of a failed <KasaOdgovor>.
+// Firmware revisions disagree on the shape of an error <Odgovor>: some put a
+// command label in <Naziv> and the error text in <Vrijednost>, while others put
+// the human-readable reason in <Naziv> and a numeric status code in
+// <Vrijednost> (e.g. "Količina nije validna ! (0.001 - 999999.999)" / 408). A
+// purely-numeric <Vrijednost> is treated as the status code; anything else is
+// error text that belongs in the message. This covers either convention,
+// instead of looking up a fixed key one of them never returns — which is what
+// produced the old "Error: undefined".
+export function parseKasaError(parsed: any): KasaErrorDetails {
   const odgovori = ([] as { Naziv?: unknown; Vrijednost?: unknown }[])
     .concat(parsed?.KasaOdgovor?.Odgovori?.Odgovor ?? [])
     .filter((o) => o != null);
 
-  const details = odgovori
+  let code: string | undefined;
+  const parts = odgovori
     .map((o) => {
       const naziv = o?.Naziv != null ? String(o.Naziv).trim() : "";
       const vrijednost = o?.Vrijednost != null ? String(o.Vrijednost).trim() : "";
+      if (vrijednost && /^\d+$/.test(vrijednost)) {
+        if (code === undefined) code = vrijednost;
+        return naziv;
+      }
       if (naziv && vrijednost) return `${naziv}: ${vrijednost}`;
       return naziv || vrijednost;
     })
-    .filter((s) => s.length > 0)
-    .join("; ");
+    .filter((s) => s.length > 0);
 
-  if (details) return details;
+  const typeRaw = parsed?.KasaOdgovor?.VrstaOdgovora;
+  const responseType =
+    typeRaw != null && String(typeRaw).trim() !== "" ? String(typeRaw).trim() : undefined;
 
-  const type = parsed?.KasaOdgovor?.VrstaOdgovora;
-  return type
-    ? `fiscal device returned "${type}" without details`
+  return {
+    deviceMessage: parts.length ? parts.join("; ") : undefined,
+    code,
+    responseType,
+  };
+}
+
+// Build a human-readable message from a failed <KasaOdgovor>, re-joining the
+// status code so the message reads the same as the device reported it.
+function formatKasaError(parsed: any): string {
+  const { deviceMessage, code, responseType } = parseKasaError(parsed);
+  if (deviceMessage) return code ? `${deviceMessage}: ${code}` : deviceMessage;
+  return responseType
+    ? `fiscal device returned "${responseType}" without details`
     : "unknown fiscal device error";
 }
 
@@ -82,6 +102,20 @@ class FiscalSDK {
       request: asString(response.config?.data),
       response: asString(response.data),
     };
+  }
+
+  // Build a FiscalError for a failed <KasaOdgovor>, carrying both the raw
+  // exchange and the structured device details so callers don't re-parse it.
+  private kasaError(
+    parsed: any,
+    response: AxiosResponse,
+    prefix?: string
+  ): FiscalError {
+    const base = formatKasaError(parsed);
+    return new FiscalError(prefix ? `${prefix}: ${base}` : base, {
+      ...this.rawExchange(response),
+      ...parseKasaError(parsed),
+    });
   }
 
   private parseTemplate(fileName: string, params: object = {}) {
@@ -126,7 +160,7 @@ class FiscalSDK {
         raw: this.rawExchange(response),
       };
     } else {
-      throw new FiscalError(formatKasaError(parsed), this.rawExchange(response));
+      throw this.kasaError(parsed, response);
     }
   }
 
@@ -164,7 +198,7 @@ class FiscalSDK {
     );
 
     if (parsed.KasaOdgovor.VrstaOdgovora !== "OK") {
-      throw new FiscalError(formatKasaError(parsed), this.rawExchange(response));
+      throw this.kasaError(parsed, response);
     }
 
     // Docs put the new reclamation's id in BrojReklamiranogRacuna while
@@ -228,10 +262,7 @@ class FiscalSDK {
     const parsed = parser.parse(response.data);
     if (parsed?.KasaOdgovor?.VrstaOdgovora === "OK") return;
 
-    throw new FiscalError(
-      `${commandName} failed: ${formatKasaError(parsed)}`,
-      this.rawExchange(response)
-    );
+    throw this.kasaError(parsed, response, `${commandName} failed`);
   }
 
   async writeToDisplay(params: WriteToDisplayParams = {}): Promise<void> {
@@ -293,10 +324,7 @@ class FiscalSDK {
     );
 
     if (parsed.KasaOdgovor.VrstaOdgovora !== "OK") {
-      throw new FiscalError(
-        `${command} failed: ${formatKasaError(parsed)}`,
-        this.rawExchange(response)
-      );
+      throw this.kasaError(parsed, response, `${command} failed`);
     }
 
     const num = (...keys: string[]): number | undefined => {
@@ -389,4 +417,4 @@ class FiscalSDK {
 
 export default FiscalSDK;
 export { FiscalError } from "./types";
-export type { RawExchange } from "./types";
+export type { RawExchange, KasaErrorDetails, FiscalErrorInfo } from "./types";

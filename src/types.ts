@@ -12,20 +12,40 @@ export interface RawExchange {
   response: string;
 }
 
+/** Structured device error parsed from a failed <KasaOdgovor>. */
+export interface KasaErrorDetails {
+  /** Human-readable device reason, from <Naziv> (plus non-numeric <Vrijednost>). */
+  deviceMessage?: string;
+  /** Numeric device status code, from <Vrijednost>, when present. */
+  code?: string;
+  /** <VrstaOdgovora>, e.g. "Greska". */
+  responseType?: string;
+}
+
+/** Everything that can be attached to a {@link FiscalError}. */
+export type FiscalErrorInfo = Partial<RawExchange> & KasaErrorDetails;
+
 /**
- * Thrown when a command fails. Carries the raw request/response XML so callers
- * can log or inspect the exact exchange that failed (e.g. report it to Sentry)
- * without re-deriving it from an axios interceptor.
+ * Thrown when a command fails. Carries the raw request/response XML and the
+ * structured device error (message, code, response type) so callers can show a
+ * real reason and report the exact exchange that failed (e.g. to Sentry)
+ * without re-parsing the XML themselves.
  */
 export class FiscalError extends Error {
   readonly request?: string;
   readonly response?: string;
+  readonly deviceMessage?: string;
+  readonly code?: string;
+  readonly responseType?: string;
 
-  constructor(message: string, exchange?: Partial<RawExchange>) {
+  constructor(message: string, info?: FiscalErrorInfo) {
     super(message);
     this.name = "FiscalError";
-    this.request = exchange?.request;
-    this.response = exchange?.response;
+    this.request = info?.request;
+    this.response = info?.response;
+    this.deviceMessage = info?.deviceMessage;
+    this.code = info?.code;
+    this.responseType = info?.responseType;
     // Restore the prototype chain — required for `instanceof FiscalError` to
     // work once this is down-compiled to the package's ES5 target.
     Object.setPrototypeOf(this, FiscalError.prototype);
