@@ -1,6 +1,6 @@
 import { rest } from "msw";
 import { setupServer } from "msw/node";
-import FiscalSDK from "../src/index";
+import FiscalSDK, { FiscalError } from "../src/index";
 
 // Test instance
 const fiscal = new FiscalSDK({
@@ -97,12 +97,35 @@ describe("Print receipt", () => {
         date: new Date(),
       });
 
-      expect(response).toStrictEqual({
+      expect(response).toMatchObject({
         amount: 10,
         date: "01.01.2023.",
         id: 420,
         time: "08:30:59",
       });
+    });
+
+    it("exposes the raw request and response XML on success", async () => {
+      const response = await fiscal.printReceipt({
+        articles: [
+          {
+            id: "1",
+            name: "Zvake",
+            price: 10,
+            rate: "E",
+            quantity: 1,
+            discount: 0,
+          },
+        ],
+        paymentMethods: [{ type: "Gotovina", amount: 10 }],
+        billId: "1",
+        date: new Date(),
+      });
+
+      expect(response.raw?.request).toContain("<RacunZahtjev");
+      expect(response.raw?.request).toContain("<Naziv>Zvake</Naziv>");
+      expect(response.raw?.response).toContain("<KasaOdgovor");
+      expect(response.raw?.response).toContain("<VrstaOdgovora>OK</VrstaOdgovora>");
     });
 
     it("includes <Kupac> block with PDVBroj when buyer.pdvNumber is set", async () => {
@@ -242,24 +265,35 @@ describe("Print receipt", () => {
     afterAll(() => server.close());
     afterEach(() => server.resetHandlers());
 
+    const params = {
+      articles: [
+        {
+          id: "1",
+          name: "Zvake",
+          price: 10,
+          rate: "E" as const,
+          quantity: 1,
+          discount: 0,
+        },
+      ],
+      paymentMethods: [{ type: "Gotovina" as const, amount: 10 }],
+      billId: "1",
+      date: new Date(),
+    };
+
     it("surfaces the device message and status code, not 'Error: undefined'", async () => {
-      await expect(
-        fiscal.printReceipt({
-          articles: [
-            {
-              id: "1",
-              name: "Zvake",
-              price: 10,
-              rate: "E",
-              quantity: 1,
-              discount: 0,
-            },
-          ],
-          paymentMethods: [{ type: "Gotovina", amount: 10 }],
-          billId: "1",
-          date: new Date(),
-        })
-      ).rejects.toThrow(/Količina nije validna.*408/);
+      await expect(fiscal.printReceipt(params)).rejects.toThrow(
+        /Količina nije validna.*408/
+      );
+    });
+
+    it("throws a FiscalError carrying the raw request and response", async () => {
+      const error = await fiscal.printReceipt(params).catch((e) => e);
+
+      expect(error).toBeInstanceOf(FiscalError);
+      expect(error.request).toContain("<RacunZahtjev");
+      expect(error.response).toContain("Količina nije validna");
+      expect(error.response).toContain("<VrstaOdgovora>Greska</VrstaOdgovora>");
     });
   });
 });

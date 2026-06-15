@@ -4,6 +4,34 @@ export interface SDKConfig {
   timeout?: number;
 }
 
+/** The raw XML exchanged with the device for a single command. */
+export interface RawExchange {
+  /** The XML payload sent to the device. */
+  request: string;
+  /** The XML payload returned by the device (empty if there was none). */
+  response: string;
+}
+
+/**
+ * Thrown when a command fails. Carries the raw request/response XML so callers
+ * can log or inspect the exact exchange that failed (e.g. report it to Sentry)
+ * without re-deriving it from an axios interceptor.
+ */
+export class FiscalError extends Error {
+  readonly request?: string;
+  readonly response?: string;
+
+  constructor(message: string, exchange?: Partial<RawExchange>) {
+    super(message);
+    this.name = "FiscalError";
+    this.request = exchange?.request;
+    this.response = exchange?.response;
+    // Restore the prototype chain — required for `instanceof FiscalError` to
+    // work once this is down-compiled to the package's ES5 target.
+    Object.setPrototypeOf(this, FiscalError.prototype);
+  }
+}
+
 interface ReceiptBuyer {
   // 13-char JIB/JMBG. Mandatory whenever a buyer is present — the driver
   // drops the whole Kupac block on the receipt if this is malformed.
@@ -58,6 +86,8 @@ export interface ReceiptResult {
   date: string;
   time: string;
   amount: number;
+  /** Raw request/response XML for this command. */
+  raw?: RawExchange;
 }
 
 /**
@@ -204,4 +234,7 @@ export interface FiscalSummary {
   taxJ?: number;
   taxK?: number;
   taxM?: number;
+
+  /** Raw request/response XML for this command. */
+  raw?: RawExchange;
 }

@@ -1,12 +1,14 @@
-import axios, { AxiosInstance } from "axios";
+import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
 import * as Mustache from "mustache";
 import { format } from "date-fns";
 import {
+  FiscalError,
   FiscalSummary,
   GetDailyReportParams,
   MoneyMovementParams,
   PrintPeriodicalReportParams,
   PrintReceiptParams,
+  RawExchange,
   ReceiptResult,
   ReclaimReceiptParams,
   ReclamationResult,
@@ -63,8 +65,23 @@ class FiscalSDK {
     try {
       return await this.axios.post(command, data);
     } catch (error) {
-      throw new Error("Failed to communicate with printer");
+      const response = (error as AxiosError)?.response?.data;
+      throw new FiscalError("Failed to communicate with printer", {
+        request: data,
+        response: response != null ? String(response) : undefined,
+      });
     }
+  }
+
+  // Pull the raw request/response XML off an axios response. The request body
+  // is preserved on config.data after the round-trip.
+  private rawExchange(response: AxiosResponse): RawExchange {
+    const asString = (value: unknown): string =>
+      typeof value === "string" ? value : value == null ? "" : String(value);
+    return {
+      request: asString(response.config?.data),
+      response: asString(response.data),
+    };
   }
 
   private parseTemplate(fileName: string, params: object = {}) {
@@ -106,9 +123,10 @@ class FiscalSDK {
         date: responses.DatumFiskalnogRacuna,
         time: responses.VrijemeFiskalnogRacuna,
         amount: +responses.IznosFiskalnogRacuna,
+        raw: this.rawExchange(response),
       };
     } else {
-      throw new Error(formatKasaError(parsed));
+      throw new FiscalError(formatKasaError(parsed), this.rawExchange(response));
     }
   }
 
@@ -146,7 +164,7 @@ class FiscalSDK {
     );
 
     if (parsed.KasaOdgovor.VrstaOdgovora !== "OK") {
-      throw new Error(formatKasaError(parsed));
+      throw new FiscalError(formatKasaError(parsed), this.rawExchange(response));
     }
 
     // Docs put the new reclamation's id in BrojReklamiranogRacuna while
@@ -160,6 +178,7 @@ class FiscalSDK {
       date: responses.DatumFiskalnogRacuna,
       time: responses.VrijemeFiskalnogRacuna,
       amount: +responses.IznosFiskalnogRacuna,
+      raw: this.rawExchange(response),
     };
   }
 
@@ -193,7 +212,7 @@ class FiscalSDK {
       "unosnovca",
       this.parseTemplate("cashmovement", params)
     );
-    this.assertKasaOk(response.data, "UnosNovca");
+    this.assertKasaOk(response, "UnosNovca");
   }
 
   async withdrawMoney(params: MoneyMovementParams): Promise<void> {
@@ -201,15 +220,18 @@ class FiscalSDK {
       "povratnovca",
       this.parseTemplate("cashmovement", params)
     );
-    this.assertKasaOk(response.data, "PovratNovca");
+    this.assertKasaOk(response, "PovratNovca");
   }
 
-  private assertKasaOk(xml: string, commandName: string): void {
+  private assertKasaOk(response: AxiosResponse, commandName: string): void {
     const parser = new XMLParser();
-    const parsed = parser.parse(xml);
+    const parsed = parser.parse(response.data);
     if (parsed?.KasaOdgovor?.VrstaOdgovora === "OK") return;
 
-    throw new Error(`${commandName} failed: ${formatKasaError(parsed)}`);
+    throw new FiscalError(
+      `${commandName} failed: ${formatKasaError(parsed)}`,
+      this.rawExchange(response)
+    );
   }
 
   async writeToDisplay(params: WriteToDisplayParams = {}): Promise<void> {
@@ -227,7 +249,7 @@ class FiscalSDK {
       "oi",
       this.parseTemplate("osnovneinformacije")
     );
-    return this.parseFiscalSummary(response.data, "OsnovneInformacije");
+    return this.parseFiscalSummary(response, "OsnovneInformacije");
   }
 
   async getDailyReport(params: GetDailyReportParams): Promise<FiscalSummary> {
@@ -236,7 +258,7 @@ class FiscalSDK {
       this.parseTemplate("oididnevniizvjestaj", params)
     );
     const summary = this.parseFiscalSummary(
-      response.data,
+      response,
       "ElektronskiDnevniIzvjestaj"
     );
 
@@ -244,8 +266,9 @@ class FiscalSDK {
     // BrojDI is out of range (verified on firmware v1.0.125+7661270). Detect
     // it by checking the returned Z number against the requested one.
     if (summary.zNumber !== params.brojDI) {
-      throw new Error(
-        `Daily report ${params.brojDI} not available (printer returned Z=${summary.zNumber ?? "<empty>"})`
+      throw new FiscalError(
+        `Daily report ${params.brojDI} not available (printer returned Z=${summary.zNumber ?? "<empty>"})`,
+        this.rawExchange(response)
       );
     }
 
@@ -253,11 +276,11 @@ class FiscalSDK {
   }
 
   private parseFiscalSummary(
-    xml: string,
+    response: AxiosResponse,
     command: "OsnovneInformacije" | "ElektronskiDnevniIzvjestaj"
   ): FiscalSummary {
     const parser = new XMLParser();
-    const parsed = parser.parse(xml);
+    const parsed = parser.parse(response.data);
 
     const r: Record<string, string> = (
       [].concat(parsed.KasaOdgovor.Odgovori.Odgovor) as {
@@ -270,7 +293,10 @@ class FiscalSDK {
     );
 
     if (parsed.KasaOdgovor.VrstaOdgovora !== "OK") {
-      throw new Error(`${command} failed: ${formatKasaError(parsed)}`);
+      throw new FiscalError(
+        `${command} failed: ${formatKasaError(parsed)}`,
+        this.rawExchange(response)
+      );
     }
 
     const num = (...keys: string[]): number | undefined => {
@@ -355,8 +381,12 @@ class FiscalSDK {
       taxJ: num("tax_j"),
       taxK: num("tax_k"),
       taxM: num("tax_m"),
+
+      raw: this.rawExchange(response),
     };
   }
 }
 
 export default FiscalSDK;
+export { FiscalError } from "./types";
+export type { RawExchange } from "./types";
