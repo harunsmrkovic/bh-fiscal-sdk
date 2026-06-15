@@ -208,7 +208,58 @@ describe("Print receipt", () => {
           billId: "1",
           date: new Date(),
         })
-      ).rejects.toThrowError("Error: ERROR_FISCAL_INVALID_ITEM_TAX");
+      ).rejects.toThrowError("ERROR_FISCAL_INVALID_ITEM_TAX");
+    });
+  });
+
+  describe("when the printer rejects with a coded error (real firmware)", () => {
+    // Real firmware puts the human-readable reason in <Naziv> and a numeric
+    // status code in <Vrijednost> — the inverse of the command-label/error-text
+    // shape the SDK originally assumed. Without surfacing <Naziv>, this used to
+    // throw the useless "Error: undefined".
+    const server = setupServer(
+      rest.post<string>(
+        "http://localhost:4000/stampatifiskalniracun",
+        async (req, res, ctx) => {
+          return res(
+            ctx.xml(`<?xml version="1.0" encoding="utf-8"?>
+      <KasaOdgovor xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+        <Odgovori>
+          <Odgovor>
+            <Naziv>Količina nije validna ! (0.001 - 999999.999)</Naziv>
+            <Vrijednost xsi:type="xsd:int">408</Vrijednost>
+          </Odgovor>
+        </Odgovori>
+        <VrstaOdgovora>Greska</VrstaOdgovora>
+        <BrojZahtjeva />
+      </KasaOdgovor>`)
+          );
+        }
+      )
+    );
+
+    beforeAll(() => server.listen());
+    afterAll(() => server.close());
+    afterEach(() => server.resetHandlers());
+
+    it("surfaces the device message and status code, not 'Error: undefined'", async () => {
+      await expect(
+        fiscal.printReceipt({
+          articles: [
+            {
+              id: "1",
+              name: "Zvake",
+              price: 10,
+              rate: "E",
+              quantity: 1,
+              discount: 0,
+            },
+          ],
+          paymentMethods: [{ type: "Gotovina", amount: 10 }],
+          billId: "1",
+          date: new Date(),
+        })
+      ).rejects.toThrow(/Količina nije validna.*408/);
     });
   });
 });

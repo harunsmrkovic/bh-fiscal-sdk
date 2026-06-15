@@ -18,6 +18,36 @@ import { XMLParser } from "fast-xml-parser";
 
 const CLASSIC_DATE_FORMAT = `yyyy-MM-dd'T'hh:mm:ss`;
 
+// Build a human-readable message from a failed <KasaOdgovor>. Firmware
+// revisions disagree on the shape of an error <Odgovor>: some put a command
+// label in <Naziv> and the error text in <Vrijednost>, while others put the
+// human-readable reason in <Naziv> and a numeric status code in <Vrijednost>
+// (e.g. "Količina nije validna ! (0.001 - 999999.999)" / 408). Surfacing both
+// fields covers either convention, instead of looking up a fixed key that one
+// of them never returns — which is what produced the old "Error: undefined".
+function formatKasaError(parsed: any): string {
+  const odgovori = ([] as { Naziv?: unknown; Vrijednost?: unknown }[])
+    .concat(parsed?.KasaOdgovor?.Odgovori?.Odgovor ?? [])
+    .filter((o) => o != null);
+
+  const details = odgovori
+    .map((o) => {
+      const naziv = o?.Naziv != null ? String(o.Naziv).trim() : "";
+      const vrijednost = o?.Vrijednost != null ? String(o.Vrijednost).trim() : "";
+      if (naziv && vrijednost) return `${naziv}: ${vrijednost}`;
+      return naziv || vrijednost;
+    })
+    .filter((s) => s.length > 0)
+    .join("; ");
+
+  if (details) return details;
+
+  const type = parsed?.KasaOdgovor?.VrstaOdgovora;
+  return type
+    ? `fiscal device returned "${type}" without details`
+    : "unknown fiscal device error";
+}
+
 class FiscalSDK {
   axios: AxiosInstance;
 
@@ -57,7 +87,6 @@ class FiscalSDK {
     const parser = new XMLParser();
     const parsed = parser.parse(response.data);
 
-    console.log(parsed);
     const responses: Record<string, string> = (
       [].concat(parsed.KasaOdgovor.Odgovori.Odgovor) as {
         Naziv: string;
@@ -79,7 +108,7 @@ class FiscalSDK {
         amount: +responses.IznosFiskalnogRacuna,
       };
     } else {
-      throw new Error(`Error: ${responses["Štampanje fiskalnog računa"]}`);
+      throw new Error(formatKasaError(parsed));
     }
   }
 
@@ -117,9 +146,7 @@ class FiscalSDK {
     );
 
     if (parsed.KasaOdgovor.VrstaOdgovora !== "OK") {
-      throw new Error(
-        `Error: ${responses["Štampanje reklamiranog računa"] ?? JSON.stringify(responses)}`
-      );
+      throw new Error(formatKasaError(parsed));
     }
 
     // Docs put the new reclamation's id in BrojReklamiranogRacuna while
@@ -182,17 +209,7 @@ class FiscalSDK {
     const parsed = parser.parse(xml);
     if (parsed?.KasaOdgovor?.VrstaOdgovora === "OK") return;
 
-    const responses: Record<string, string> = (
-      [].concat(parsed?.KasaOdgovor?.Odgovori?.Odgovor ?? []) as {
-        Naziv: string;
-        Vrijednost: string;
-      }[]
-    ).reduce(
-      (acc, item) => ({ ...acc, [item.Naziv]: item.Vrijednost }),
-      {}
-    );
-    const detail = Object.values(responses).join("; ") || "unknown error";
-    throw new Error(`Error: ${commandName} failed: ${detail}`);
+    throw new Error(`${commandName} failed: ${formatKasaError(parsed)}`);
   }
 
   async writeToDisplay(params: WriteToDisplayParams = {}): Promise<void> {
@@ -253,7 +270,7 @@ class FiscalSDK {
     );
 
     if (parsed.KasaOdgovor.VrstaOdgovora !== "OK") {
-      throw new Error(`Error: ${command} failed: ${JSON.stringify(r)}`);
+      throw new Error(`${command} failed: ${formatKasaError(parsed)}`);
     }
 
     const num = (...keys: string[]): number | undefined => {
